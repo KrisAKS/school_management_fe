@@ -23,18 +23,18 @@ import { authClient } from '@/lib/auth/client';
 import { useUser } from '@/hooks/use-user';
 
 const schema = zod.object({
-  email: zod.string().min(1, { message: 'Email is required' }).email(),
+  username: zod.string().min(1, { message: 'Username is required' }).email(),
   password: zod.string().min(1, { message: 'Password is required' }),
 });
 
 type Values = zod.infer<typeof schema>;
 
-const defaultValues = { email: 'sofia@devias.io', password: 'Secret1' } satisfies Values;
+const defaultValues = { username: '', password: '' } satisfies Values;
 
 export function SignInForm(): React.JSX.Element {
   const router = useRouter();
 
-  const { checkSession } = useUser();
+  const { setUser, checkSession } = useUser();
 
   const [showPassword, setShowPassword] = React.useState<boolean>();
 
@@ -50,23 +50,69 @@ export function SignInForm(): React.JSX.Element {
   const onSubmit = React.useCallback(
     async (values: Values): Promise<void> => {
       setIsPending(true);
+  
+  console.log('Submitted values:', values);
+      try {
+        // Convert the values to URL-encoded format
+        const formBody = new URLSearchParams();
+        formBody.append('username', values.username);
+        formBody.append('password', values.password);
 
-      const { error } = await authClient.signInWithPassword(values);
+        const response = await fetch('http://localhost:8080/login/user-login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formBody.toString(),
+        });
+  
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('API Error Response:', errorData);
+          setError('root', { type: 'server', message: errorData.message || 'Login failed' });
+          setIsPending(false);
+          return;
+        }
+  
+        const data = await response.json();
+        console.log('API Response:', data);
 
-      if (error) {
-        setError('root', { type: 'server', message: error });
+        console.log('Login successful:', data);
+        if (Array.isArray(data) && data.length > 0) {
+          const user = data[0]; // Access the first object in the array
+        
+          // Save token to localStorage
+          localStorage.setItem('token', user.token);
+        
+          // Update the UserContext
+          console.log("User: ", user)
+          setUser(user); // This updates the global user state
+        
+          // Redirect to the dashboard
+          const roleRoutes: Record<string, string> = {
+            Student: paths.dashboard.overview, // Replace with your Student dashboard path
+            user: paths.dashboard.account,    // Replace with your User dashboard path
+            guest: paths.dashboard.customers, // Replace with your Guest dashboard path
+          };
+        
+          const redirectPath = roleRoutes[user.userRole] || paths.default; // Fallback to a default path
+          router.push(redirectPath);
+        
+          // Refresh the auth state
+          await checkSession?.();
+        } else {
+          console.error('Unexpected API response format:', data);
+          setError('root', { type: 'server', message: 'Invalid response from server' });
+        }
+
+      } catch (err) {
+        setError('root', { type: 'server', message: "An unexpected error occurred" });
+        console.error('Error during login:', err);
+      } finally {
         setIsPending(false);
-        return;
       }
-
-      // Refresh the auth state
-      await checkSession?.();
-
-      // UserProvider, for this case, will not refresh the router
-      // After refresh, GuestGuard will handle the redirect
-      router.refresh();
     },
-    [checkSession, router, setError]
+    [setUser, checkSession, router, setError]
   );
 
   return (
@@ -84,12 +130,12 @@ export function SignInForm(): React.JSX.Element {
         <Stack spacing={2}>
           <Controller
             control={control}
-            name="email"
+            name="username"
             render={({ field }) => (
-              <FormControl error={Boolean(errors.email)}>
-                <InputLabel>Email address</InputLabel>
-                <OutlinedInput {...field} label="Email address" type="email" />
-                {errors.email ? <FormHelperText>{errors.email.message}</FormHelperText> : null}
+              <FormControl error={Boolean(errors.username)}>
+                <InputLabel>Username</InputLabel>
+                <OutlinedInput {...field} label="Username" type="text" />
+                {errors.username ? <FormHelperText>{errors.username.message}</FormHelperText> : null}
               </FormControl>
             )}
           />
